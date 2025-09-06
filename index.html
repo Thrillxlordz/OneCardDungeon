@@ -2,41 +2,42 @@
 <script type="text/javascript" src="script.js"></script>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
 
-<style>
-
-  .header {
-    text-align: center;
+<style>  
+  * {
+    margin: 0
   }
 
-  .sliderInfo {
-    margin-top: -20px;
+  .header {
+    position: relative;
+    text-align: center;
+    font-size: 5vh;
+    font-weight: bolder;
+    z-index: 10;
   }
 
   p {
-    margin-bottom: -2%;
     font-size: 25px;
   }
 
   #canvas {
-    margin-left: auto;
-    margin-right: auto;
     text-align: left;
     background-color: rgb(75, 75, 75);
   }
 
 .buttons {
   position: relative;
-  top: -2%;
   text-align: center;
-  margin-bottom: -3%;
+  z-index: 10;
 }
 
   button {
-    margin-left: auto;
-    margin-right: auto;
     text-align: center;
-    padding-left: 15px;
-    padding-right: 15px;
+  }
+
+  html {
+    background-color: rgb(75, 75, 75);
+    overflow-x: hidden;
+    overflow-y: hidden;
   }
 
 </style>
@@ -46,18 +47,14 @@
   <head>
     <title>One Card Dungeon</title>
   </head>
-  <body>
-    <h1 class="header">One Card Dungeon
-      <span style="float:right">
-        <a style="font-size:16px" href="https://thrillxlordz.github.io">Home
-        </a>
-      </span>
-    </h1>
+  <div id="canvas">
+    <div class="header">One Card Dungeon
+      <a style="font-size:16px; position:absolute; top:2; right:2;" href="https://thrillxlordz.github.io">Home
+      </a>
+    </div>
     <div class="buttons">
       <button type="button" id="startRun" onclick="startRun();">Start Run</button>
       <button type="button" id="resetRun" onclick="resetRun();">Reset Run</button>
     </div>
-    <p id="canvas">
-    </p>
- </body>
+ </div>
 </html>
