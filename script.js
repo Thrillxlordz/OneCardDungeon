@@ -28,7 +28,7 @@ function setup() {
     onMousePress(event)
   })
 
-  player = new entity(6, 1, 1, 1, 2)
+  player = new entity(6, 4, 6, 3, 3)
   setupMaps()
 }
 
@@ -75,23 +75,105 @@ function startRun() {
     
 }
 
+function passTurn() {
+    // Start enemy turn
+    resolveEnemyTurns()
+
+    // Reset entity values
+    currentMap.startNextTurn()
+}
+
+function resolveEnemyTurns() {
+    var enemies = []
+
+    // Adds all enemies to the enemies array
+    for (var i = 0; i < currentMap.width; i++) {
+        for (var j = 0; j < currentMap.height; j++) {
+            if (currentMap.cells[i][j].entity != null && currentMap.cells[i][j].entity != player) {
+                enemies.push(currentMap.cells[i][j].entity)
+            }
+        }
+    }
+    
+    // Sorts enemies, putting closest first and furthest last
+    enemies.sort((a, b) => {
+        return currentMap.distFromCellToCell(a.currentCell, player.currentCell) - currentMap.distFromCellToCell(b.currentCell, player.currentCell)
+    })
+    
+    // Move & Attack with all enemies
+    var totalAttackOnPlayer = 0
+    for (var i = 0; i < enemies.length; i++) {
+        var enemy = enemies[i]
+        var distGrid = currentMap.getDistGrid(player.currentCell, enemy.currentCell)
+        
+        while (enemy.currentMovement > 1 && distGrid[enemy.currentCell.coordRow][enemy.currentCell.coordCol] != enemy.currentRange) {
+            var cellNeighbors = currentMap.getCellNeighbors(enemy.currentCell)
+            var targetCell = enemy.currentCell
+            var targetCellDist = distGrid[enemy.currentCell.coordRow][enemy.currentCell.coordCol]
+            var targetCellInRange = enemy.currentRange >= currentMap.distFromCellToCell(player.currentCell, enemy.currentCell)
+            for (var j = 0; j < cellNeighbors.length; j++) {
+                var neighborRow = cellNeighbors[j].coordRow
+                var neighborCol = cellNeighbors[j].coordCol
+                var cellDist = distGrid[neighborRow][neighborCol]
+                if (targetCellInRange) {
+                    if (cellDist <= enemy.currentRange && cellDist > targetCellDist) {
+                        if (enemy.currentMovement >= currentMap.distFromCellToCell(enemy.currentCell, cellNeighbors[j]) && cellNeighbors[j].entity == null) {
+                            // Cell is a suitable target!
+                            targetCell = cellNeighbors[j]
+                            targetCellDist = cellDist
+                            targetCellInRange = enemy.currentRange >= currentMap.distFromCellToCell(player.currentCell, cellNeighbors[j])
+                        }
+                    }
+                } else {
+                    if (cellDist < targetCellDist) {
+                        if (enemy.currentMovement >= currentMap.distFromCellToCell(enemy.currentCell, cellNeighbors[j]) && cellNeighbors[j].entity == null) {
+                            // Cell is a suitable target!
+                            targetCell = cellNeighbors[j]
+                            targetCellDist = cellDist
+                            targetCellInRange = enemy.currentRange >= currentMap.distFromCellToCell(player.currentCell, cellNeighbors[j])
+                        }
+                    }
+                }
+            }
+
+            // No better cell to move to!
+            if (targetCell == enemy.currentCell) {
+                break;
+            }
+
+            // Move this enemy to target cell!
+            enemy.currentMovement -= currentMap.distFromCellToCell(enemy.currentCell, targetCell)
+            targetCell.setEntity(enemy.currentCell.takeEntity())
+        }
+
+        if (distGrid[enemy.currentCell.coordRow][enemy.currentCell.coordCol] <= enemy.currentRange) {
+            // Time to attack!
+            totalAttackOnPlayer += enemy.currentAttack
+        }
+    }
+
+    player.takeDamage(Math.floor(totalAttackOnPlayer / player.currentDefense))
+
+}
+
 function onMousePress(mouseEvent) {
     chosenCell = currentMap.getCellByXY(mouseEvent.clientX, mouseEvent.clientY)
     if (chosenCell == null) {
         return
     }
 
-    console.log(currentMap.distFromCellToCell(player.currentCell, chosenCell))
-
-    if (!chosenCell.canBeVisited()) {
-        // Invalid Move, maybe a valid attack
-
-    } else if (currentMap.cellsAreOrthogonal(player.currentCell, chosenCell)) {
-        // Move Orthogonally
+    if (chosenCell.canBeVisited) {
+        // Move to this cell
+        player.currentMovement -= currentMap.distFromCellToCell(player.currentCell, chosenCell)
         chosenCell.setEntity(player.currentCell.takeEntity())
-    } else if (currentMap.cellsAreDiagonal(player.currentCell, chosenCell)) {
-        // Move Diagonally
-        chosenCell.setEntity(player.currentCell.takeEntity())
+
+    } else if (chosenCell.canBeAttacked && chosenCell.entity != null && chosenCell.entity != player) {
+        // Attack this cell's entity
+        var enemy = chosenCell.entity
+        if (enemy.currentDefense < player.currentAttack) {
+            enemy.takeDamage(1)
+            player.currentAttack -= enemy.currentDefense
+        } 
     }
 }
 
@@ -129,24 +211,68 @@ class map {
             var startY = myCanvas.height / 2 - cellSize * this.height / 2
 
             // Draws the grid
+
             for (var i = 0; i < this.width; i++) {
                 for (var j = 0; j < this.height; j++) {
-                    this.cells[i][j].drawCell(startX + j * cellSize, startY + i * cellSize, cellSize, cellSize)
+                    this.cells[i][j].canBeVisited = false
+                    this.cells[i][j].canBeAttacked = false
                 }
             }
 
+            var distGrid = this.getDistGrid(player.currentCell)
+            for (var i = 0; i < this.width; i++) {
+                for (var j = 0; j < this.height; j++) {
+                    if (distGrid[i][j] >= 0 && distGrid[i][j] <= player.currentMovement) {
+                        this.cells[i][j].canBeVisited = true
+                        var rangeGrid = this.getRangeGrid(this.cells[i][j])
+                        for (var k = 0; k < this.width; k++) {
+                            for (var l = 0; l < this.height; l++) {
+                                if (rangeGrid[k][l] >= 0 && rangeGrid[k][l] <= player.currentRange) {
+                                    this.cells[k][l].canBeAttacked = true
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (var i = 0; i < this.width; i++) {
+                for (var j = 0; j < this.height; j++) {
+                    var leftCoord = startX + j * cellSize
+                    var topCoord = startY + i * cellSize
+                    this.cells[i][j].drawCell(leftCoord, topCoord, cellSize, cellSize)
+                }
+            }
+            
+            var statTextSize = myCanvas.width / 40
+
             // Draws the player's stats
+            startX = myCanvas.width * 1 / 4 - cellSize * this.width / 4
+            var statLine =  "\nHP: " + player.maxHp +
+                            "\nMovement: " + player.maxMovement +
+                            "\nAttack: " + player.maxAttack +
+                            "\nDefense: " + player.maxDefense +
+                            "\nRange: " + player.maxRange
+
+            fill('#FFFFFF')
+            textSize(statTextSize)
+            stroke(0)
+            strokeWeight(3)
+            textAlign(CENTER, CENTER)
+            text("\\ Player Stats /", startX, myCanvas.height / 4)
+            textAlign(RIGHT, CENTER)
+            text(statLine, startX * 1, myCanvas.height / 2)
 
             // Draws the enemy's stats
             startX = myCanvas.width * 3 / 4 + cellSize * this.width / 4
-            var statLine =  "\nHP: " + this.entityType.hp + 
-                            "\nMovement: " + this.entityType.movement +
-                            "\nAttack: " + this.entityType.attack + 
-                            "\nDefense: " + this.entityType.defense +
-                            "\nRange: " + this.entityType.range
+            var statLine =  "\nHP: " + this.entityType.maxHp + 
+                            "\nMovement: " + this.entityType.maxMovement +
+                            "\nAttack: " + this.entityType.maxAttack + 
+                            "\nDefense: " + this.entityType.maxDefense +
+                            "\nRange: " + this.entityType.maxRange
 
             fill('#FFFFFF')
-            textSize((myCanvas.width - startX) / 5)
+            textSize(statTextSize)
             stroke(0)
             strokeWeight(3)
             textAlign(CENTER, CENTER)
@@ -175,6 +301,11 @@ class map {
         }
 
         this.distFromCellToCell = function(fromCell, toCell) {
+            return this.getDistGrid(fromCell, toCell)[toCell.coordRow][toCell.coordCol]
+            
+        }
+
+        this.getDistGrid = function(fromCell, targetCell = null) {
             var distGrid = []
             for (var i = 0; i < this.cells.length; i++) {
                 distGrid.push([])
@@ -191,12 +322,12 @@ class map {
                 var currentCellNeighbors = this.getCellNeighbors(currentCell)
                 for (var i = 0; i < currentCellNeighbors.length; i++) {
                     var neighbor = currentCellNeighbors[i]
-                    if (this.cellsAreOrthogonal(currentCell, neighbor) && neighbor.canBeVisited()) {
+                    if (this.cellsAreOrthogonal(currentCell, neighbor) && (neighbor.isEmpty() || neighbor == targetCell)) {
                         if (distGrid[neighbor.coordRow][neighbor.coordCol] > distGrid[currentCell.coordRow][currentCell.coordCol] + 2) {
                             distGrid[neighbor.coordRow][neighbor.coordCol] = distGrid[currentCell.coordRow][currentCell.coordCol] + 2
                             cellsToCheck.push(neighbor)
                         }
-                    } else if (this.cellsAreDiagonal(currentCell, neighbor) && neighbor.canBeVisited()) {
+                    } else if (this.cellsAreDiagonal(currentCell, neighbor) && (neighbor.isEmpty() || neighbor == targetCell)) {
                         if (distGrid[neighbor.coordRow][neighbor.coordCol] > distGrid[currentCell.coordRow][currentCell.coordCol] + 3) {
                             distGrid[neighbor.coordRow][neighbor.coordCol] = distGrid[currentCell.coordRow][currentCell.coordCol] + 3
                             cellsToCheck.push(neighbor)
@@ -204,8 +335,40 @@ class map {
                     }
                 }
             }
-            return distGrid[toCell.coordRow][toCell.coordCol]
-            
+            return distGrid
+        }
+
+        this.getRangeGrid = function(fromCell) {
+            var rangeGrid = []
+            for (var i = 0; i < this.cells.length; i++) {
+                rangeGrid.push([])
+                for (var j = 0; j < this.cells[0].length; j++) {
+                    rangeGrid[i].push(999)
+                }
+            }
+
+            rangeGrid[fromCell.coordRow][fromCell.coordCol] = 0
+            var cellsToCheck = []
+            cellsToCheck.push(fromCell)    
+            while (cellsToCheck.length > 0) {
+                var currentCell = cellsToCheck.shift()
+                var currentCellNeighbors = this.getCellNeighbors(currentCell)
+                for (var i = 0; i < currentCellNeighbors.length; i++) {
+                    var neighbor = currentCellNeighbors[i]
+                    if (this.cellsAreOrthogonal(currentCell, neighbor) && neighbor.baseValue != -1) {
+                        if (rangeGrid[neighbor.coordRow][neighbor.coordCol] > rangeGrid[currentCell.coordRow][currentCell.coordCol] + 2) {
+                            rangeGrid[neighbor.coordRow][neighbor.coordCol] = rangeGrid[currentCell.coordRow][currentCell.coordCol] + 2
+                            cellsToCheck.push(neighbor)
+                        }
+                    } else if (this.cellsAreDiagonal(currentCell, neighbor) && neighbor.baseValue != -1) {
+                        if (rangeGrid[neighbor.coordRow][neighbor.coordCol] > rangeGrid[currentCell.coordRow][currentCell.coordCol] + 3) {
+                            rangeGrid[neighbor.coordRow][neighbor.coordCol] = rangeGrid[currentCell.coordRow][currentCell.coordCol] + 3
+                            cellsToCheck.push(neighbor)
+                        }
+                    }
+                }
+            }
+            return rangeGrid
         }
 
         this.getCellNeighbors = function(originCell) {
@@ -249,6 +412,19 @@ class map {
                 return false
             }
         }
+
+        this.startNextTurn = function() {
+            for (var i = 0; i < this.width; i++) {
+                for (var j = 0; j < this.width; j++) {
+                    if (this.cells[i][j].entity != null) {
+                        this.cells[i][j].entity.currentMovement = this.cells[i][j].entity.maxMovement
+                        this.cells[i][j].entity.currentAttack = this.cells[i][j].entity.maxAttack
+                        this.cells[i][j].entity.currentDefense = this.cells[i][j].entity.maxDefense
+                        this.cells[i][j].entity.currentRange = this.cells[i][j].entity.maxRange
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -258,6 +434,8 @@ class cell {
         this.coordRow = coordRow
         this.coordCol = coordCol
         this.entity = null
+        this.canBeVisited = false
+        this.canBeAttacked = false
 
         this.drawCell = function(startX = 0, startY = 0, width = 0, height = 0) {
             if (this.entity == null) {
@@ -266,6 +444,7 @@ class cell {
                 } else {
                     fill('#353030')
                 }
+                strokeWeight(3)
                 rect(startX, startY, width, height)
             }
             else {
@@ -277,7 +456,7 @@ class cell {
                     stroke(0)
                     strokeWeight(4)
                     textAlign(CENTER, CENTER)
-                    text(this.entity.hp, startX + width / 2, startY + height / 2)
+                    text(this.entity.currentHp, startX + width / 2, startY + height / 2)
                 } else {
                     fill('#FF0000')
                     rect(startX, startY, width, height)
@@ -286,8 +465,18 @@ class cell {
                     stroke(0)
                     strokeWeight(4)
                     textAlign(CENTER, CENTER)
-                    text(this.entity.hp, startX + width / 2, startY + height / 2)
+                    text(this.entity.currentHp, startX + width / 2, startY + height / 2)
                 }
+            }
+
+            if (this.canBeVisited) {
+                fill('#00FF0022') 
+                strokeWeight(1)
+                rect(startX, startY, width, height)
+            } else if (this.canBeAttacked) {
+                fill('#0000FF22')
+                strokeWeight(1)
+                rect(startX, startY, width, height)
             }
         }
 
@@ -306,34 +495,44 @@ class cell {
             return takenEntity
         }
 
-        this.canBeVisited = function() {
+        this.isEmpty = function() {
             return (this.baseValue != -1 && this.entity == null)
+        }
+
+        this.setCanBeVisited = function(canBeVisited) {
+            this.canBeVisited = canBeVisited
         }
     }
 }
 
 class entity {
     constructor(hp = 0, movement = 0, attack = 0, defense = 0, range = 0) {
-        this.hp = hp
-        this.movement = movement
-        this.attack = attack
-        this.defense = defense
-        this.range = range
+        this.maxHp = hp
+        this.currentHp = hp
+        this.maxMovement = movement
+        this.currentMovement = movement
+        this.maxAttack = attack
+        this.currentAttack = attack
+        this.maxDefense = defense
+        this.currentDefense = defense
+        this.maxRange = range
+        this.currentRange = range
+
         this.currentCell = null
 
         this.takeDamage = function(damage) {
-            this.hp -= damage
-            if (this.hp <= 0) {
+            this.currentHp -= damage
+            if (this.currentHp <= 0) {
                 this.die()
             }
         }
 
         this.die = function() {
-            // This entity has died
+            this.currentCell.entity = null
         }
 
         this.getCopy = function() {
-            return new entity(this.hp, this.movement, this.attack, this.defense, this.range)
+            return new entity(this.maxHp, this.maxMovement, this.maxAttack, this.maxDefense, this.maxRange)
         }
     }
 }
