@@ -1,12 +1,19 @@
 let myCanvas
 let backgroundColor
+let cellWidth
+let cellHeight
+let cellSize
 
-let currentRound = 1
+let currentLoop = 1
+let maxLoops = 3
 let currentMapIndex = 0
 let currentMap
 let maps
 let mapWidth = 5
 let mapHeight = 5
+let rollableDice
+let statModifiers
+let playerHasActed = false
 
 let player
 let spider
@@ -15,27 +22,50 @@ let ogre
 let dragon
 
 function setup() {
-  myCanvas = createCanvas(windowWidth, windowHeight)
-  myCanvas.parent("#canvas")
-  var myCanvasStyle = document.getElementById("defaultCanvas0").style
-  myCanvasStyle.position = "absolute"
-  myCanvasStyle.top = 0
+    myCanvas = createCanvas(windowWidth, windowHeight)
+    myCanvas.parent("#canvas")
+    var myCanvasStyle = document.getElementById("defaultCanvas0").style
+    myCanvasStyle.position = "absolute"
+    myCanvasStyle.top = 0
 
-  backgroundColor = window.getComputedStyle(document.getElementById("canvas")).getPropertyValue('background-color')
-  background(backgroundColor)
+    backgroundColor = window.getComputedStyle(document.getElementById("canvas")).getPropertyValue('background-color')
+    background(backgroundColor)
 
-  document.addEventListener('mousedown', function(event) {
-    onMousePress(event)
-  })
+    document.addEventListener('mousedown', function(event) {
+        onMousePress(event)
+    })
 
-  player = new entity(6, 4, 6, 3, 3)
-  setupMaps()
+    document.addEventListener('keydown', function(event) {
+        onKeyDown(event)
+    })
+
+    player = new entity(6, 1, 1, 1, 2)
+    setupMaps()
+    
+    cellWidth = myCanvas.width / (currentMap.width + 1)   // This +1 is to create a half-cell buffer around the edge of the screen
+    cellHeight = myCanvas.height / (currentMap.height + 1.5) // This +1.5 is to create a 3/4-cell buffer around the edge of the screen
+    cellSize = Math.min(cellWidth, cellHeight)
+    
+    setupRollableDice()
+    setupStatModifiers()
 }
 
 function draw() {
-  background(backgroundColor)
+    background(backgroundColor)
 
-  currentMap.drawMap()
+    currentMap.drawMap()
+
+    startX = myCanvas.width * 1 / 4 - cellSize * currentMap.width / 4 - (cellSize / 2 * rollableDice.length / 2)
+    startY = myCanvas.height * 3 / 4
+    for (var i = 0; i < rollableDice.length; i++) {
+        rollableDice[i].drawDie(startX + cellSize / 2 * i, startY, cellSize / 3, cellSize / 3)
+    }
+
+    startX = myCanvas.width * 1 / 4 - cellSize * currentMap.width / 4 + myCanvas.width / 40
+    startY = myCanvas.height * 0.44
+    for (var i = 0; i < statModifiers.length; i++) {
+        statModifiers[i].drawStatModifier(startX, startY + myCanvas.width / 32 * i, cellSize / 3, cellSize / 3)
+    }
 }
 
 // Maps consist of cells with values -2 = playerStart, -1 = wall, 0 = empty,  1+ = enemyStart (1 = round 1, 2 = round 2, etc)
@@ -71,19 +101,34 @@ function setupMaps() {
     currentMap.initializeMap()
 }
 
+function setupRollableDice() {
+    rollableDice = []
+    rollableDice.push(new rollableDie(1, 6))
+    rollableDice.push(new rollableDie(1, 6))
+    rollableDice.push(new rollableDie(1, 6))
+}
+
+function setupStatModifiers() {
+    statModifiers = []
+    statModifiers.push(new statModifier("Movement"))
+    statModifiers.push(new statModifier("Attack"))
+    statModifiers.push(new statModifier("Defense"))
+}
+
 function startRun() {
     
 }
 
-function passTurn() {
+async function passTurn() {
     // Start enemy turn
-    resolveEnemyTurns()
+    await resolveEnemyTurns()
 
     // Reset entity values
     currentMap.startNextTurn()
+    resetPlayerInfo()
 }
 
-function resolveEnemyTurns() {
+function checkWinLoss() {
     var enemies = []
 
     // Adds all enemies to the enemies array
@@ -94,7 +139,51 @@ function resolveEnemyTurns() {
             }
         }
     }
-    
+
+    if (enemies.length == 0) {
+        win()
+    } else if (player.currentHp <= 0) {
+        lose()
+    }
+}
+
+async function win() {
+    currentMapIndex++
+    if (currentMapIndex < maps.length) {
+        await upgradePlayer()
+        setupMaps()
+        resetPlayerInfo()
+    } else if (currentLoop < maxLoops) {
+        currentLoop++
+        currentMapIndex = 0
+        await upgradePlayer()
+        setupMaps()
+        resetPlayerInfo()
+    } else {
+        console.log("Game Over?")
+    }
+
+}
+
+function lose() {
+    currentMapIndex = 0
+    currentLoop = 1
+    player = new entity(6, 1, 1, 1, 2)
+    setupMaps()
+}
+
+async function resolveEnemyTurns() {
+    var enemies = []
+
+    // Adds all enemies to the enemies array
+    for (var i = 0; i < currentMap.width; i++) {
+        for (var j = 0; j < currentMap.height; j++) {
+            if (currentMap.cells[i][j].entity != null && currentMap.cells[i][j].entity != player) {
+                enemies.push(currentMap.cells[i][j].entity)
+            }
+        }
+    }
+
     // Sorts enemies, putting closest first and furthest last
     enemies.sort((a, b) => {
         return currentMap.distFromCellToCell(a.currentCell, player.currentCell) - currentMap.distFromCellToCell(b.currentCell, player.currentCell)
@@ -107,6 +196,8 @@ function resolveEnemyTurns() {
         var distGrid = currentMap.getDistGrid(player.currentCell, enemy.currentCell)
         
         while (enemy.currentMovement > 1 && distGrid[enemy.currentCell.coordRow][enemy.currentCell.coordCol] != enemy.currentRange) {
+            draw()
+            await sleep(200)
             var cellNeighbors = currentMap.getCellNeighbors(enemy.currentCell)
             var targetCell = enemy.currentCell
             var targetCellDist = distGrid[enemy.currentCell.coordRow][enemy.currentCell.coordCol]
@@ -156,29 +247,160 @@ function resolveEnemyTurns() {
 
 }
 
+async function upgradePlayer() {
+    // TODO: Implement this part
+    player.maxMovement += 1
+    player.maxAttack += 1
+    player.maxDefense += 1
+    player.maxRange += 1
+    await sleep(1000)
+}
+
+function resetPlayerInfo() {
+    playerHasActed = false
+    for (var i = 0; i < rollableDice.length; i++) {
+        rollableDice[i].reset()
+    }
+    for (var i = 0; i < statModifiers.length; i++) {
+        statModifiers[i].reset()
+    }
+    player.currentMovement = player.maxMovement
+    player.currentAttack = player.maxAttack
+    player.currentDefense = player.maxDefense
+    player.currentRange = player.maxRange
+}
+
 function onMousePress(mouseEvent) {
-    chosenCell = currentMap.getCellByXY(mouseEvent.clientX, mouseEvent.clientY)
-    if (chosenCell == null) {
-        return
+    var chosenCell = currentMap.getCellByXY(mouseEvent.clientX, mouseEvent.clientY)
+    var chosenDie = null
+    var chosenStatModifier = null
+    for (var i = 0; i < rollableDice.length; i++) {
+        if (rollableDice[i].isClicked(mouseEvent.clientX, mouseEvent.clientY)) {
+            chosenDie = rollableDice[i]
+        }
+    }
+    
+    for (var i = 0; i < statModifiers.length; i++) {
+        if (statModifiers[i].isClicked(mouseEvent.clientX, mouseEvent.clientY)) {
+            chosenStatModifier = statModifiers[i]
+        }
+    }
+    
+    if (chosenDie != null) {
+        // A die was clicked on
+
+        dieChosen(chosenDie)
+
+    } else if (chosenStatModifier != null) {
+        // A stat modifier was selected
+
+        statModChosen(chosenStatModifier)
+
+    } else if (chosenCell != null) {
+        // A cell was clicked on
+
+        cellChosen(chosenCell)
+
     }
 
-    if (chosenCell.canBeVisited) {
+    for (var i = 0; i < rollableDice.length; i++) {
+        rollableDice[i].select(rollableDice[i].isClicked(mouseEvent.clientX, mouseEvent.clientY))
+    }
+
+}
+
+function onKeyDown(event) {
+    switch (event.key) {
+        case "1":
+            dieChosen(rollableDice[0])
+            rollableDice[1].select(false)
+            rollableDice[2].select(false)
+            break
+        case "2":
+            dieChosen(rollableDice[1])
+            rollableDice[0].select(false)
+            rollableDice[2].select(false)
+            break
+        case "3":
+            dieChosen(rollableDice[2])
+            rollableDice[0].select(false)
+            rollableDice[1].select(false)
+            break
+        case " ":
+            passTurn()
+            break
+        default:
+            break
+    }
+}
+
+function dieChosen(chosenDie) {
+    if (!playerHasActed) {
+        // Checks if the player has moved yet - we can't assign dice if we've already moved!
+
+        if (chosenDie.isRolling) {
+            chosenDie.stopRolling()
+        } else {
+            chosenDie.select(true)
+        }
+    }
+}
+
+function statModChosen(chosenStatModifier) {
+    if (!playerHasActed) {
+        // Checks if the player has moved yet - we can't assign dice if we've already moved!
+
+        // Check if there is a die we are currently selecting
+        var selectedDie = null
+        for (var i = 0; i < rollableDice.length; i++) {
+            if (rollableDice[i].isSelected) {
+                selectedDie = rollableDice[i]
+            }
+        }
+        if (selectedDie != null) {
+            selectedDie.assignModifier(chosenStatModifier)
+            selectedDie.select(false)
+        }
+    }
+}
+
+function cellChosen(chosenCell) {
+    var allDiceAssigned = true
+    for (var i = 0; i < rollableDice.length; i++) {
+        if (!rollableDice[i].isAssigned) {
+            allDiceAssigned = false
+        }
+    }
+
+    if (!allDiceAssigned) {
+        // Player must assign all dice before moving!
+    } else if (chosenCell.canBeVisited) {
         // Move to this cell
         player.currentMovement -= currentMap.distFromCellToCell(player.currentCell, chosenCell)
         chosenCell.setEntity(player.currentCell.takeEntity())
+        playerHasActed = true
 
-    } else if (chosenCell.canBeAttacked && chosenCell.entity != null && chosenCell.entity != player) {
+    } else if (currentMap.getRangeGrid(player.currentCell)[chosenCell.coordRow][chosenCell.coordCol] <= player.currentRange && chosenCell.entity != null && chosenCell.entity != player) {
         // Attack this cell's entity
         var enemy = chosenCell.entity
-        if (enemy.currentDefense < player.currentAttack) {
-            enemy.takeDamage(1)
+        if (enemy.currentDefense <= player.currentAttack) {
             player.currentAttack -= enemy.currentDefense
+            playerHasActed = true
+            enemy.takeDamage(1)
         } 
     }
 }
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight)
+  
+    cellWidth = myCanvas.width / (currentMap.width + 1)   // This +1 is to create a half-cell buffer around the edge of the screen
+    cellHeight = myCanvas.height / (currentMap.height + 1.5) // This +1.5 is to create a 3/4-cell buffer around the edge of the screen
+    cellSize = Math.min(cellWidth, cellHeight)
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 class map {
@@ -194,7 +416,7 @@ class map {
                 this.cells.push([])
                 for (var j = 0; j < this.height; j++) {
                     this.cells[i].push(new cell(cells[i][j], i, j))
-                    if (cells[i][j] == currentRound) {
+                    if (cells[i][j] == currentLoop) {
                         this.cells[i][j].setEntity(this.entityType.getCopy())
                     } else if (cells[i][j] == -2) {
                         this.cells[i][j].setEntity(player)
@@ -204,9 +426,6 @@ class map {
         }
 
         this.drawMap = function() {
-            var cellWidth = myCanvas.width / (this.width + 1)   // This +1 is to create a half-cell buffer around the edge of the screen
-            var cellHeight = myCanvas.height / (this.height + 1.5) // This +1.5 is to create a 3/4-cell buffer around the edge of the screen
-            var cellSize = Math.min(cellWidth, cellHeight)
             var startX = myCanvas.width / 2 - cellSize * this.width / 2
             var startY = myCanvas.height / 2 - cellSize * this.height / 2
 
@@ -261,7 +480,9 @@ class map {
             textAlign(CENTER, CENTER)
             text("\\ Player Stats /", startX, myCanvas.height / 4)
             textAlign(RIGHT, CENTER)
-            text(statLine, startX * 1, myCanvas.height / 2)
+            text(statLine, startX, myCanvas.height / 2)
+            textAlign(LEFT, CENTER)
+            text("\n +     = " + player.currentMovement + "\n +     = " + player.currentAttack + "\n +     = " + player.currentDefense, startX, myCanvas.height / 2)
 
             // Draws the enemy's stats
             startX = myCanvas.width * 3 / 4 + cellSize * this.width / 4
@@ -282,9 +503,6 @@ class map {
         }
 
         this.getCellByXY = function(x, y) {
-            var cellWidth = myCanvas.width / (this.width + 1)   // This +1 is to create a half-cell buffer around the edge of the screen
-            var cellHeight = myCanvas.height / (this.height + 1.5) // This +1.5 is to create a 3/4-cell buffer around the edge of the screen
-            var cellSize = Math.min(cellWidth, cellHeight)
             var startX = myCanvas.width / 2 - cellSize * this.width / 2
             var startY = myCanvas.height / 2 - cellSize * this.height / 2
             
@@ -529,10 +747,184 @@ class entity {
 
         this.die = function() {
             this.currentCell.entity = null
+            checkWinLoss()
         }
 
         this.getCopy = function() {
             return new entity(this.maxHp, this.maxMovement, this.maxAttack, this.maxDefense, this.maxRange)
+        }
+    }
+}
+
+class rollableDie {
+    constructor(minVal = 1, maxVal = 6) {
+        this.minVal = minVal
+        this.maxVal = maxVal
+
+        this.startX = 0
+        this.startY = 0
+        this.width = 0
+        this.height = 0
+        this.isRolling = true
+        this.isSelected = false
+        this.isAssigned = false
+        this.assignedModifier = null
+
+        this.val = 0
+
+        this.reset = function() {
+            this.startRolling()
+            this.select(false)
+            this.unassignModifier()
+        }
+
+        this.rollValue = function() {
+            this.val = Math.floor(Math.random() * (this.maxVal - this.minVal + 1) + this.minVal)
+            return this.val
+        }
+
+        this.drawDie = function(startX = 0, startY = 0, width = 0, height = 0) {
+            this.startX = startX
+            this.startY = startY
+            this.width = width
+            this.height = height
+
+            if (this.isRolling) {
+                this.rollValue()
+            }
+            if (this.isSelected) {
+                stroke("#00ff00")
+                strokeWeight(4)
+            } else {
+                stroke(0)
+                strokeWeight(2)
+            }
+            if (this.isAssigned) {
+                fill("#aaaaff")
+            } else {
+                fill('#ffffff')
+            }
+            rect(startX, startY, width, height)
+            fill('#000000')
+
+            stroke(0)
+            strokeWeight(2)
+            textAlign(CENTER, CENTER)
+            textSize(width)
+            text(this.val, startX + width / 2, startY + height / 1.8)
+        }
+
+        this.startRolling = function() {
+            this.isRolling = true
+        }
+
+        this.stopRolling = function() {
+            this.isRolling = false
+        }
+
+        this.isClicked = function(mouseX, mouseY) {
+            return (mouseX >= this.startX && mouseX <= this.startX + this.width && mouseY >= this.startY && mouseY <= this.startY + this.height)
+        }
+
+        this.select = function(selected) {
+            this.isSelected = selected
+        }
+
+        this.assignModifier = function(assignedModifier) {
+            if (this.assignedModifier != null) {
+                this.unassignModifier()
+            }
+            this.isAssigned = true
+            this.assignedModifier = assignedModifier
+            this.assignedModifier.assignDie(this)
+        }
+
+        this.unassignModifier = function() {
+            this.isAssigned = false
+            if (this.assignedModifier != null) {
+                this.assignedModifier.unassignDie()
+                this.assignedModifier = null
+            }
+        }
+    }
+}
+
+class statModifier {
+    constructor(modifiedStat = null) {
+        this.modifiedStat = modifiedStat
+        this.val = 0
+        this.startX = 0
+        this.startY = 0
+        this.width = 0
+        this.height = 0
+
+        this.assignedDie = null
+
+        this.reset = function() {
+            this.unassignDie()
+        }
+
+        this.drawStatModifier = function(startX = 0, startY = 0, width = 0, height = 0) {
+            this.startX = startX
+            this.startY = startY
+            this.width = width
+            this.height = height
+
+            
+            stroke(0)
+            strokeWeight(2)
+            fill(255)
+            rect(startX, startY, width, height)
+
+            if (this.val != 0) {
+                fill(0)
+                textAlign(CENTER, CENTER)
+                textSize(width)
+                text(this.val, startX + width / 2, startY + height / 1.8)
+            }
+        }
+
+        this.assignDie = function(assignedDie) {
+            if (this.assignedDie != null) {
+                this.assignedDie.unassignModifier()
+            }
+            this.assignedDie = assignedDie
+            this.val = this.assignedDie.val
+            switch (this.modifiedStat) {
+                case "Movement":
+                    player.currentMovement += this.val
+                    break
+                case "Attack":
+                    player.currentAttack += this.val
+                    break
+                case "Defense":
+                    player.currentDefense += this.val
+                    break
+                default:
+                    console.log("Invalid modified Stat")
+            }
+        }
+
+        this.unassignDie = function() {
+            this.assignedDie = null
+            switch (this.modifiedStat) {
+                case "Movement":
+                    player.currentMovement -= this.val
+                    break
+                case "Attack":
+                    player.currentAttack -= this.val
+                    break
+                case "Defense":
+                    player.currentDefense -= this.val
+                    break
+                default:
+                    console.log("Invalid modified Stat")
+            }
+            this.val = 0
+        }
+
+        this.isClicked = function(mouseX, mouseY) {
+            return (mouseX >= this.startX && mouseX <= this.startX + this.width && mouseY >= this.startY && mouseY <= this.startY + this.height)
         }
     }
 }
