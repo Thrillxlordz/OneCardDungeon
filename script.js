@@ -13,7 +13,9 @@ let mapWidth = 5
 let mapHeight = 5
 let rollableDice
 let statModifiers
+let statUpgraders
 let playerHasActed = false
+let displayPlayerUpgrades = false
 
 let player
 let spider
@@ -48,6 +50,7 @@ function setup() {
     
     setupRollableDice()
     setupStatModifiers()
+    setupStatUpgraders()
 }
 
 function draw() {
@@ -115,6 +118,15 @@ function setupStatModifiers() {
     statModifiers.push(new statModifier("Defense"))
 }
 
+function setupStatUpgraders() {
+    statUpgraders = []
+    statUpgraders.push(new statUpgrader("Hp"))
+    statUpgraders.push(new statUpgrader("Movement"))
+    statUpgraders.push(new statUpgrader("Attack"))
+    statUpgraders.push(new statUpgrader("Defense"))
+    statUpgraders.push(new statUpgrader("Range"))
+}
+
 function startRun() {
     
 }
@@ -150,14 +162,16 @@ function checkWinLoss() {
 async function win() {
     currentMapIndex++
     if (currentMapIndex < maps.length) {
-        await upgradePlayer()
         setupMaps()
+        resetPlayerInfo()
+        await upgradePlayer()
         resetPlayerInfo()
     } else if (currentLoop < maxLoops) {
         currentLoop++
         currentMapIndex = 0
-        await upgradePlayer()
         setupMaps()
+        resetPlayerInfo()
+        await upgradePlayer()
         resetPlayerInfo()
     } else {
         console.log("Game Over?")
@@ -196,7 +210,6 @@ async function resolveEnemyTurns() {
         var distGrid = currentMap.getDistGrid(player.currentCell, enemy.currentCell)
         
         while (enemy.currentMovement > 1 && distGrid[enemy.currentCell.coordRow][enemy.currentCell.coordCol] != enemy.currentRange) {
-            draw()
             await sleep(200)
             var cellNeighbors = currentMap.getCellNeighbors(enemy.currentCell)
             var targetCell = enemy.currentCell
@@ -248,12 +261,12 @@ async function resolveEnemyTurns() {
 }
 
 async function upgradePlayer() {
-    // TODO: Implement this part
-    player.maxMovement += 1
-    player.maxAttack += 1
-    player.maxDefense += 1
-    player.maxRange += 1
-    await sleep(1000)
+    
+    displayPlayerUpgrades = true
+
+    while (displayPlayerUpgrades) {
+        await sleep(100)
+    }
 }
 
 function resetPlayerInfo() {
@@ -271,36 +284,54 @@ function resetPlayerInfo() {
 }
 
 function onMousePress(mouseEvent) {
+    // Clicked on a cell?
     var chosenCell = currentMap.getCellByXY(mouseEvent.clientX, mouseEvent.clientY)
+    // Clicked on a die?
     var chosenDie = null
+    // Clicked on a stat modifier box?
     var chosenStatModifier = null
+    // Clicked on a stat?
+    var chosenStat = null
+
+    // Check dice for which one was clicked, if any
     for (var i = 0; i < rollableDice.length; i++) {
         if (rollableDice[i].isClicked(mouseEvent.clientX, mouseEvent.clientY)) {
             chosenDie = rollableDice[i]
         }
     }
     
+    // Check stat modifiers for which one was clicked, if any
     for (var i = 0; i < statModifiers.length; i++) {
         if (statModifiers[i].isClicked(mouseEvent.clientX, mouseEvent.clientY)) {
             chosenStatModifier = statModifiers[i]
         }
     }
+
+    for (var i = 0; i < statUpgraders.length; i++) {
+        if (statUpgraders[i].isClicked(mouseEvent.clientX, mouseEvent.clientY)) {
+            chosenStat = statUpgraders[i].stat
+        }
+    }
     
-    if (chosenDie != null) {
+    if (chosenDie != null && !displayPlayerUpgrades) {
         // A die was clicked on
 
         dieChosen(chosenDie)
 
-    } else if (chosenStatModifier != null) {
+    } else if (chosenStatModifier != null && !displayPlayerUpgrades) {
         // A stat modifier was selected
 
         statModChosen(chosenStatModifier)
 
-    } else if (chosenCell != null) {
+    } else if (chosenCell != null && !displayPlayerUpgrades) {
         // A cell was clicked on
 
         cellChosen(chosenCell)
 
+    } else if (chosenStat != null) {
+        // A stat was clicked on (probably for an upgrade)
+
+        statChosen(chosenStat)
     }
 
     for (var i = 0; i < rollableDice.length; i++) {
@@ -310,6 +341,9 @@ function onMousePress(mouseEvent) {
 }
 
 function onKeyDown(event) {
+    if (displayPlayerUpgrades) {
+        return
+    }
     switch (event.key) {
         case "1":
             dieChosen(rollableDice[0])
@@ -391,6 +425,31 @@ function cellChosen(chosenCell) {
     }
 }
 
+function statChosen(chosenStat) {
+    switch (chosenStat) {
+        case "Hp":
+            player.currentHp = player.maxHp
+            break
+        case "Movement":
+            player.maxMovement++
+            break
+        case "Attack":
+            player.maxAttack++
+            break
+        case "Defense":
+            player.maxDefense++
+            break
+        case "Range":
+            player.maxRange++
+            break
+        default:
+            console.log("No stat chosen!")
+    }
+
+    displayPlayerUpgrades = false
+    
+}
+
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight)
   
@@ -467,7 +526,27 @@ class map {
 
             // Draws the player's stats
             startX = myCanvas.width * 1 / 4 - cellSize * this.width / 4
-            var statLine =  "\nHP: " + player.maxHp +
+
+            if (displayPlayerUpgrades)  {
+
+
+                textAlign(CENTER, CENTER)
+                textSize(myCanvas.width / 20)
+                stroke(0)
+                strokeWeight(myCanvas.width / 200)
+                fill("#00000099")
+                rect(myCanvas.width / 4, myCanvas.height / 4, myCanvas.width / 2, myCanvas.height / 2)
+                fill(255)
+                text("Select a stat to\npermanently increase\nit by 1, or select HP\nto restore to 6 HP", myCanvas.width / 2, myCanvas.height / 2)
+
+                statUpgraders[0].drawStatUpgrader(startX - statTextSize * 2.75, myCanvas.height / 2 + statTextSize * 5 / 4 * -2, statTextSize * 3, statTextSize * 5 / 4)
+                statUpgraders[1].drawStatUpgrader(startX - statTextSize * 5.9, myCanvas.height / 2 + statTextSize * 5 / 4 * -1, statTextSize * 6.15, statTextSize * 5 / 4)
+                statUpgraders[2].drawStatUpgrader(startX - statTextSize * 4, myCanvas.height / 2 + statTextSize * 5 / 4 * 0, statTextSize * 4.25, statTextSize * 5 / 4)
+                statUpgraders[3].drawStatUpgrader(startX - statTextSize * 5, myCanvas.height / 2 + statTextSize * 5 / 4 * 1, statTextSize * 5.25, statTextSize * 5 / 4)
+                statUpgraders[4].drawStatUpgrader(startX - statTextSize * 4.25, myCanvas.height / 2 + statTextSize * 5 / 4 * 2, statTextSize * 4.5, statTextSize * 5 / 4)
+            }
+
+            var statLine =  "\nHP: " + player.currentHp +
                             "\nMovement: " + player.maxMovement +
                             "\nAttack: " + player.maxAttack +
                             "\nDefense: " + player.maxDefense +
@@ -925,6 +1004,37 @@ class statModifier {
 
         this.isClicked = function(mouseX, mouseY) {
             return (mouseX >= this.startX && mouseX <= this.startX + this.width && mouseY >= this.startY && mouseY <= this.startY + this.height)
+        }
+    }
+}
+
+class statUpgrader {
+    constructor(stat = null) {
+        this.stat = stat
+        this.startX = 0
+        this.startY = 0
+        this.width = 0
+        this.height = 0
+
+        this.drawStatUpgrader = function(startX = 0, startY = 0, width = 0, height = 0) {
+            this.startX = startX
+            this.startY = startY
+            this.width = width
+            this.height = height
+
+            stroke(0)
+            strokeWeight(2)
+            fill('#00ff0011')
+            rect(this.startX, this.startY, this.width, this.height)
+            
+        }
+
+        this.isClicked = function(mouseX, mouseY) {
+            if (displayPlayerUpgrades) {
+                return (mouseX >= this.startX && mouseX <= this.startX + this.width && mouseY >= this.startY && mouseY <= this.startY + this.height)
+            } else {
+                return false
+            }
         }
     }
 }
